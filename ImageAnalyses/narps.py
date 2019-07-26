@@ -262,7 +262,9 @@ class NarpsTeam(object):
                     os.path.basename(img))
             thresh_mask_image = self.images['thresh']['thresh_mask_orig'][hyp]
             if not os.path.exists(os.path.dirname(thresh_mask_image)):
-                os.mkdir(os.path.dirname(thresh_mask_image))
+                os.mkdir(os.path.dirname(thresh_mask_image))  # TG: should be 
+                                                              # done in 
+                                                              # NarpsDir
             if overwrite or not os.path.exists(thresh_mask_image):
 
                 # load the image and threshold/binarize it
@@ -313,7 +315,9 @@ class NarpsTeam(object):
                     'hypo%d_%s.nii.gz' % (hyp, imgtype))
                 self.images[imgtype]['resampled'][hyp] = outfile
                 if not os.path.exists(os.path.dirname(outfile)):
-                    os.mkdir(os.path.dirname(outfile))
+                    os.mkdir(os.path.dirname(outfile)) # TG: should be 
+                                                       # done in 
+                                                       # NarpsDir
                 if not os.path.exists(outfile) or overwrite:
                     if self.verbose:
                         print("resampling", infile)
