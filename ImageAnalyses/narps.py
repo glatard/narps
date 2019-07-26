@@ -42,6 +42,7 @@ from utils import get_metadata, TtoZ, get_map_metadata,\
 # this is necessary for now because the data are still private
 # once the data are public we can share the info.json file
 
+# From TG: avoid global variables (DATA_URL and hypotheses)
 if 'DATA_URL' in os.environ:
     DATA_URL = os.environ['DATA_URL']
     print('reading data URL from environment')
@@ -96,41 +97,39 @@ class NarpsDirs(object):
     def __init__(self, basedir, data_url=None,
                  force_download=False):
 
-        # set up a dictionary to contain all of the
-        # directories
-        self.dirs = {}
-
-        # check to make sure home of basedir exists
-        assert os.path.exists(os.path.dirname(basedir))
-        self.dirs['base'] = basedir
-        if not os.path.exists(basedir):
-            os.mkdir(basedir)
         self.force_download = force_download
         if data_url is None:
             self.data_url = DATA_URL
 
+        # set up a dictionary to contain all of the
+        # directories
+
+        # check to make sure home of basedir exists
+        assert os.path.exists(os.path.dirname(basedir))
+        if not os.path.exists(basedir):
+            os.mkdir(basedir)
+
         dirs_to_add = ['output', 'templates', 'metadata',
                        'cached', 'figures', 'logs', 'orig']
-        for d in dirs_to_add:
-            self.dirs[d] = os.path.join(self.dirs['base'], d)
+        self.dirs = {d:os.path.join(basedir, d) for d in dirs_to_add}
+        self.dirs['base'] = basedir
+
+        # add output directories 
+        output_dirs = ['resampled', 'rectified', 'zstat',
+                       'thresh_mask_orig', 'concat_thresh']  # TG concat_thresh
+                                                             # isn't used
+        self.dirs.update({o:os.path.join(self.dirs['output'], o)
+                          for o in output_dirs})
+        # TG: the whole directory munching thing looks a bit complicated
 
         # autogenerate all of the directories
         # except for the orig dir
-        dirs_to_make = list(set(dirs_to_add).difference(['orig']))
-        for d in dirs_to_make:
-            if not os.path.exists(self.dirs[d]):
+        for d in dirs_to_add + output_dirs:
+            if d != 'orig' and not os.path.exists(self.dirs[d]):
                 os.mkdir(self.dirs[d])
 
         self.logfile = os.path.join(self.dirs['logs'], 'narps.txt')
         log_to_file(self.logfile, 'Running Narps main class', flush=True)
-
-        output_dirs = ['resampled', 'rectified', 'zstat',
-                       'thresh_mask_orig', 'concat_thresh']
-
-        for o in output_dirs:
-            self.dirs[o] = os.path.join(self.dirs['output'], o)
-            if not os.path.exists(self.dirs[o]):
-                os.mkdir(self.dirs[o])
 
         # if raw data don't exist, download them
         if self.force_download and os.path.exists(self.dirs['orig']):
@@ -156,16 +155,19 @@ class NarpsDirs(object):
         """
         download original data from repository
         """
-        log_to_file(self.logfile, '\n\nget_orig_data')
+        log_to_file(self.logfile, '{}{}get_orig_data'.format(os.linesep,
+                                                             os.linesep))
         log_to_file(self.logfile, 'DATA_URL: %s' % DATA_URL)
         MAX_TRIES = 5
 
         if self.data_url is None:
-            print('no URL for original data, cannot download')
-            print('should be specified in info.json')
+            log_to_file(self.logfile, 'no URL for original data, '
+                                      'cannot download')
+            log_to_file(self.logfile, 'should be specified in info.json '
+                                      'or using -u')
             return
 
-        print('orig data do not exist, downloading...')
+        log_to_file(self.logfile, 'orig data do not exist, downloading...')
         output_directory = self.dirs['base']
         no_dl = True
         ntries = 0
@@ -199,7 +201,7 @@ class NarpsTeam(object):
         self.datadir_label = '%s_%s' % (NV_collection_id, teamID)
         # directory for the original maps
         self.input_dir = os.path.join(self.dirs.dirs['orig'],
-                                      '%s_%s' % (NV_collection_id, teamID))
+                                      self.datadir_label)
         if not os.path.exists(self.input_dir):
             print("Warning: Input dir (%s) does not exist" % self.input_dir)
 
@@ -258,12 +260,10 @@ class NarpsTeam(object):
                     self.dirs.dirs['thresh_mask_orig'],
                     self.datadir_label,
                     os.path.basename(img))
-            if not os.path.exists(os.path.dirname(
-                    self.images['thresh']['thresh_mask_orig'][hyp])):
-                os.mkdir(os.path.dirname(
-                    self.images['thresh']['thresh_mask_orig'][hyp]))
-            if overwrite or not os.path.exists(
-                    self.images['thresh']['thresh_mask_orig'][hyp]):
+            thresh_mask_image = self.images['thresh']['thresh_mask_orig'][hyp]
+            if not os.path.exists(os.path.dirname(thresh_mask_image)):
+                os.mkdir(os.path.dirname(thresh_mask_image))
+            if overwrite or not os.path.exists(thresh_mask_image):
 
                 # load the image and threshold/binarize it
                 threshimg = nibabel.load(img)
@@ -280,12 +280,10 @@ class NarpsTeam(object):
                 # as original
                 bin_img = nibabel.Nifti1Image(threshdata_bin,
                                               affine=threshimg.affine)
-                bin_img.to_filename(
-                    self.images['thresh']['thresh_mask_orig'][hyp])
+                bin_img.to_filename(thresh_mask_image)
             else:
                 # if it already exists, just use existing
-                bin_img = nibabel.load(
-                    self.images['thresh']['thresh_mask_orig'][hyp])
+                bin_img = nibabel.load(thresh_mask_image)
                 if self.verbose:
                     print('using existing binary mask for', self.teamID)
                 threshdata_bin = bin_img.get_data()
@@ -332,17 +330,25 @@ class NarpsTeam(object):
                     # intention
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
+                        # this assumes that images are already aligned to 
+                        # MNI space, although possibly in a different geometry.
+                        # Visual QC was done to ensure that.
+                        # TG: This also writes maps to INT8, which potentially
+                        # losses information.
                         resampled = nilearn.image.resample_to_img(
                             infile,
                             self.dirs.MNI_template,
                             interpolation=interp_type[imgtype])
 
+                    # TG: not sure why this is necessary
                     if imgtype == 'thresh':
                         resampled = nilearn.image.math_img(
                             'img>0.5',
                             img=resampled)
 
                     resampled.to_filename(outfile)
+                    # TG: note to self: careful, binarized thresholded 
+                    # images (in thresh_mask_orig) havent been resampled
 
                 else:
                     if self.verbose:
@@ -374,7 +380,6 @@ class Narps(object):
         self.input_dirs = self.get_input_dirs(self.dirs)
 
         # check images for each team
-        self.complete_image_sets = None
         self.get_orig_images(self.dirs)
         log_to_file(
             self.dirs.logfile,
@@ -404,7 +409,7 @@ class Narps(object):
         """
         # make full image mask (all voxels)
         mi = nibabel.load(self.dirs.MNI_mask)
-        d = mi.get_data()
+        d = mi.get_data()  # could get the shape from the header instead of loading the data
         d = numpy.ones(d.shape)
         full_mask = nibabel.Nifti1Image(d, affine=mi.affine)
         full_mask.to_filename(self.dirs.full_mask_img)
@@ -415,6 +420,7 @@ class Narps(object):
         - assumes that images.json is present for each valid dir
         """
 
+        # Find all the collection dirs that have a thresholded map for hypo1
         input_files = glob.glob(
             os.path.join(dirs.dirs['orig'], '*/hypo1_thresh.nii.gz'))
         input_dirs = [os.path.dirname(i) for i in input_files]
@@ -451,7 +457,7 @@ class Narps(object):
         create binarized thresholded maps for each team
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         for teamID in self.complete_image_sets:
             self.teams[teamID].create_binarized_thresh_masks()
@@ -461,7 +467,7 @@ class Narps(object):
         resample all images into FSL MNI space
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         if overwrite is None:
             overwrite = self.overwrite
@@ -473,7 +479,7 @@ class Narps(object):
         get # of nonzero and NA voxels for each image
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         if overwrite is None:
             overwrite = self.overwrite
@@ -483,11 +489,12 @@ class Narps(object):
             print('using cached image metdata')
             image_metadata_df = pandas.read_csv(image_metadata_file)
             return(image_metadata_df)
-        # otherwise load from scractch
+        # otherwise load from scratch
         image_metadata = []
         masker = nilearn.input_data.NiftiMasker(mask_img=self.dirs.MNI_mask)
         for teamID in self.complete_image_sets:
             for hyp in self.teams[teamID].images['thresh']['resampled']:
+                # TG: this could use list comprehension
                 threshfile = self.teams[teamID].images[
                     'thresh']['resampled'][hyp]
                 threshdata = masker.fit_transform(threshfile)
@@ -509,7 +516,7 @@ class Narps(object):
         ordered by self.complete_image_sets
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -530,7 +537,8 @@ class Narps(object):
                     self.dirs.dirs['concat_%s' % imgtype],
                     'hypo%d.nii.gz' % hyp)
                 if not os.path.exists(os.path.dirname(outfile)):
-                    os.mkdir(os.path.dirname(outfile))
+                    os.mkdir(os.path.dirname(outfile))  # TG: this should be 
+                                                        # done in NarpsDir
                 if not os.path.exists(outfile) or overwrite:
                     if self.verbose:
                         print('%s - hypo %d: creating concat file' % (
@@ -547,6 +555,9 @@ class Narps(object):
                     # and save to a new file
                     masker = nilearn.input_data.NiftiMasker(
                         mask_img=self.dirs.MNI_mask)
+
+                    # TG: I guess this simply applies the mask to all the 
+                    # maps and saves them to the same 4D image but not 100% sure
                     concat_data = masker.fit_transform(
                         self.all_maps[imgtype][datatype])
                     concat_img = masker.inverse_transform(concat_data)
@@ -555,7 +566,7 @@ class Narps(object):
                     if self.verbose:
                         print('%s - hypo %d: using existing file' % (
                             imgtype, hyp))
-        return(self.all_maps)
+        return(self.all_maps)  # TG: this return value doesn't seem to be used
 
     def create_thresh_overlap_images(self, datatype='resampled',
                                      overwrite=None, thresh=1e-5):
@@ -563,7 +574,7 @@ class Narps(object):
         create overlap maps for thresholded images
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -614,7 +625,7 @@ class Narps(object):
         present positive evidence for each contrast
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -690,14 +701,14 @@ class Narps(object):
             with open(os.path.join(self.dirs.dirs['metadata'],
                                    'rectified_images_list.txt'), 'w') as f:
                 for l in self.rectified_list:
-                    f.write('%s\t%s\n' % (l[0], l[1]))
+                    f.write(('%s\t%s{}' % (l[0], l[1])).format(os.linesep))
 
     def compute_image_stats(self, datatype='zstat', overwrite=None):
         """
         compute std and range on statistical images
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -759,7 +770,7 @@ class Narps(object):
         - use metadata supplied by teams to determine image type
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -848,7 +859,7 @@ class Narps(object):
         estimate smoothness of Z maps using FSL's smoothness estimation
         """
         log_to_file(
-            self.dirs.logfile, '\n\n%s' %
+            self.dirs.logfile, os.linesep + os.linesep + '%s' %
             sys._getframe().f_code.co_name)
         func_args = inspect.getargvalues(
             inspect.currentframe()).locals
@@ -1187,7 +1198,9 @@ if __name__ == "__main__":
     parser.add_argument('-u', '--dataurl',
                         help='URL to download data')
     parser.add_argument('-b', '--basedir',
-                        help='base directory')
+                        help='base directory. If not set, defaults to '
+                              'env variable NARPS_BASEDIR if set, otherwise'
+                              '/data')
     parser.add_argument('-s', '--simulate',
                         action='store_true',
                         help='use simulated data')
@@ -1208,6 +1221,7 @@ if __name__ == "__main__":
 
     # set up simulation if specified
     if args.simulate:
+        #TODO (TG): skipped that for now
         print('using simulated data')
 
         # load main class from real analysis

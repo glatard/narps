@@ -25,9 +25,9 @@ To run the full analysis pipeline using Docker, do the following:
 
 -   Install the [Docker client](https://docs.docker.com/install/)
 -   set the following environment variables:
-    -   ```NARPS_BASEDIR```: location for the data and results
+    -   ```NARPS_BASEDIR```: location for the data and results  ## NOT SURE IF DATA SHOULD BE DWNLOADED FIRST
     -   ```DATA_URL```: URL for the data
--   clone the present repository and cd to the cloned directory
+-   clone the present repository and cd to directory ImageAnalyses
 -   use the following command to run the full pipeline: ```make run-all```
 
 This performs the following steps:

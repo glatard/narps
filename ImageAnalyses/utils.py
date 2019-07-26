@@ -36,9 +36,10 @@ def log_to_file(fname, s, flush=False,
             s = str(s)
         if also_print:
             print(s)
-        f.write(s+'\n')
+        f.write(s + os.linesep)
         if flush and add_timestamp:
-            f.write(datetime.isoformat(datetime.now())+'\n\n')
+            f.write(datetime.isoformat(datetime.now())
+                    + os.linesep + os.linesep)
 
 
 def get_masked_data(hyp, mask_img, output_dir,
